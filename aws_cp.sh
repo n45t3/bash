@@ -1,9 +1,11 @@
 #!/bin/bash
 
 ### FIELDS ###
+
+target= ;
 bucket= ;
 source= ;
-target= ;
+output= ;
 isfile= ;
 
 ### OUTPUT ###
@@ -30,7 +32,7 @@ err(){
 
 usage(){
 cat >> 1 <<-EOF
-USAGE: $0 bucket [source-destination pairs]
+USAGE: $0 [from|to] bucket [source-destination pairs]
 BUCKET:
    aws-style s3 link to the bucket (s3://.*)
 SOURCE-DESTINATION PAIRS:
@@ -41,6 +43,15 @@ SOURCE-DESTINATION PAIRS:
    - absolute or relative location in the file system
      can specify either a single file or a whole directory
 EOF
+}
+
+set_target(){
+   target=$(echo $1 | tr '[:upper:]' '[:lower:]') ;
+   if [[ $target == 'from' || $target == 'to' ]] ; then
+      return 0 ;
+   fi
+   target= ;
+   return 1 ;
 }
 
 set_bucket(){
@@ -54,32 +65,36 @@ set_bucket(){
 
 set_pair(){
    source=$(echo $1 | cut -d':' -f1) ;
-   target=$(echo $1 | cut -d':' -f2) ;
+   output=$(echo $1 | cut -d':' -f2) ;
    isfile=$(echo $1 | cut -d':' -f3) ;
    
    if [[ $source && \
-         $target && \
+         $output && \
          ( ! $isfile || \
            $isfile =~ [DdFf] ) ]] ; then
       return 0 ;
    fi ;
    
    source= ;
-   target= ;
+   output= ;
    isfile= ;
    return 1 ;
 }
 
-get_files(){
-   if [[ ! -e $target ]] ; then
-      warn 'get_files' "no file or folder: $target, creating..." ;
-      mkdir -p $target ;
+copy_from(){
+   if [[ ! -e $output ]] ; then
+      warn 'get_files' "no file or folder: $output, creating..." ;
+      mkdir -p $output ;
       if [[ $isfile =~ [Ff] ]] ; then
-         local tmp=$(echo $target | rev | cut -d'/' -f1 | rev) ;
+         local tmp=$(echo $output | rev | cut -d'/' -f1 | rev) ;
          rmdir $tmp ;
       fi
    fi
-   aws s3 cp $bucket/$source $target --recursive ;
+   aws s3 cp $bucket/$source $output --recursive ;
+}
+
+copy_to(){
+   aws s3 sync $source $bucket/$output --recursive ;
 }
 
 ### MAIN ###
@@ -94,14 +109,14 @@ if [[ ! $(which aws) ]] ; then
    exit 1 ;
 fi
 
-set_bucket $1 || {
+set_target $1 && shift || target=from ;
+set_bucket $1 && shift || {
    err '__main__' "invalid bucket: $1" ;
    exit 2 ;
 }
-shift ;
 
 for arg in $@ ; do
    set_pair $arg && \
-      get_files || \
+      eval "copy_$target" || \
       err '__main__' "invalid argument: $arg" ;
 done
